@@ -34,6 +34,14 @@
       Budget (&pound;m)
       <input type="number" id="budgetInput" min="80" max="100" step="0.1" value="100.0" />
     </label>
+    <label class="budget-label" for="startWeekInput">
+      Start GW
+      <input type="number" id="startWeekInput" min="1" max="38" step="1" value="1" />
+    </label>
+    <label class="budget-label" for="endWeekInput">
+      End GW
+      <input type="number" id="endWeekInput" min="1" max="38" step="1" value="5" />
+    </label>
     <button id="rebuildBtn" class="btn btn-primary">Rebuild teams</button>
     <span id="statusMsg" class="status-msg"></span>
   </section>
@@ -43,7 +51,8 @@
     <button class="tab" data-tab="xiSquad" role="tab">Best XI, Cheap Bench</button>
     <button class="tab" data-tab="valueHalfSquad" role="tab">Best Value (2nd Half)</button>
     <button class="tab" data-tab="xiHalfSquad" role="tab">Best XI (2nd Half)</button>
-    <button class="tab" data-tab="comingWeeksSquad" role="tab">Best Team, Coming Weeks</button>
+    <button class="tab" data-tab="comingWeeksValueSquad" role="tab">Best Value Coming Weeks</button>
+    <button class="tab" data-tab="comingWeeksXISquad" role="tab">Best XI Coming Weeks</button>
     <button class="tab" data-tab="playerTable" role="tab">All Players</button>
   </nav>
 
@@ -75,20 +84,18 @@
     <p class="hint">Same as Best XI, Cheap Bench, but the starting XI is chosen to maximise second-half-of-season points (GW20-38) instead of the full season. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
-  <section id="comingWeeksSquad" class="tab-panel">
-    <div class="card controls">
-      <label class="budget-label" for="startWeekInput">
-        Start GW
-        <input type="number" id="startWeekInput" min="1" max="38" step="1" value="1" />
-      </label>
-      <label class="budget-label" for="endWeekInput">
-        End GW
-        <input type="number" id="endWeekInput" min="1" max="38" step="1" value="5" />
-      </label>
-    </div>
-    <div class="card summary-card" id="comingWeeksSummary"></div>
-    <div class="pitch" id="comingWeeksPitch"></div>
-    <p class="hint">Predicts each player's points per fixture against their opponent's last-season strength (by quarter of last season's final table), with dedicated logic for newly promoted/relegated clubs, then builds the 15-man squad that maximises total predicted points across Start&ndash;End gameweeks within budget. Change the GW range or budget and hit "Rebuild teams" above to recompute. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
+  <section id="comingWeeksValueSquad" class="tab-panel">
+    <div class="card summary-card" id="comingWeeksValueSummary"></div>
+    <div class="pitch" id="comingWeeksValuePitch"></div>
+    <p class="hint">Predicts each player's points per fixture against their opponent's last-season strength (by quarter of last season's final table), with dedicated logic for newly promoted/relegated clubs, then builds the 15-man squad that maximises total predicted points across the Start&ndash;End gameweeks above within budget. Change the GW range or budget and hit "Rebuild teams" above to recompute. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
+  </section>
+
+  <section id="comingWeeksXISquad" class="tab-panel">
+    <div class="card summary-card" id="comingWeeksXISummary"></div>
+    <div class="pitch" id="comingWeeksXIPitch"></div>
+    <h3 class="bench-heading">Bench (cheapest fillers)</h3>
+    <div class="bench-row" id="comingWeeksXIBench"></div>
+    <p class="hint">Same predicted-points model as Best Value Coming Weeks, but the starting XI is chosen to maximise predicted points in a valid formation across the Start&ndash;End gameweeks above; the 4 bench players are the cheapest available for their position. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
   <section id="playerTable" class="tab-panel">

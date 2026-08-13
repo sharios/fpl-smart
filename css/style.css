@@ -69,11 +69,11 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 .status-msg { font-size: 0.78rem; color: var(--text-muted); }
 
 .tabs {
-  display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px;
 }
 .tab {
-  flex: 1 0 auto; white-space: nowrap; border: none; background: #eae5ee; color: var(--purple);
-  padding: 10px 14px; border-radius: 10px; font-weight: 700; font-size: 0.82rem; cursor: pointer;
+  white-space: normal; line-height: 1.2; text-align: center; border: none; background: #eae5ee; color: var(--purple);
+  padding: 9px 6px; border-radius: 10px; font-weight: 700; font-size: 0.74rem; cursor: pointer;
 }
 .tab.active { background: var(--purple); color: #fff; }
 

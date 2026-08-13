@@ -1,4 +1,4 @@
-const CACHE_NAME = "fpl-team-builder-v5";
+const CACHE_NAME = "fpl-team-builder-v6";
 const CORE_ASSETS = [
   "./",
   "./index.html",
