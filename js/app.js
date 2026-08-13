@@ -4,10 +4,11 @@
 // Four squad tabs share the same rendering/fixing logic; they differ only in
 // which optimizer they call and which player field they maximise.
 const CONTEXTS = {
-  value: { resultKey: "valueResult", isXI: false, valueKey: "last_season_points", pointsLabel: "pts" },
-  xi: { resultKey: "xiResult", isXI: true, valueKey: "last_season_points", pointsLabel: "pts" },
-  valueHalf: { resultKey: "valueHalfResult", isXI: false, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts" },
-  xiHalf: { resultKey: "xiHalfResult", isXI: true, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts" },
+  value: { resultKey: "valueResult", isXI: false, valueKey: "last_season_points", pointsLabel: "pts", periodLabel: "last szn" },
+  xi: { resultKey: "xiResult", isXI: true, valueKey: "last_season_points", pointsLabel: "pts", periodLabel: "last szn" },
+  valueHalf: { resultKey: "valueHalfResult", isXI: false, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts", periodLabel: "last szn" },
+  xiHalf: { resultKey: "xiHalfResult", isXI: true, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts", periodLabel: "last szn" },
+  comingWeeks: { resultKey: "comingWeeksResult", isXI: false, valueKey: "_predictedPoints", pointsLabel: "predicted pts", periodLabel: "GW range" },
 };
 
 const DOM_IDS = {
@@ -15,6 +16,7 @@ const DOM_IDS = {
   xi: { summary: "#xiSummary", pitch: "#xiPitch", bench: "#xiBench" },
   valueHalf: { summary: "#valueHalfSummary", pitch: "#valueHalfPitch" },
   xiHalf: { summary: "#xiHalfSummary", pitch: "#xiHalfPitch", bench: "#xiHalfBench" },
+  comingWeeks: { summary: "#comingWeeksSummary", pitch: "#comingWeeksPitch" },
 };
 
 const state = {
@@ -24,6 +26,11 @@ const state = {
   xiResult: null,
   valueHalfResult: null,
   xiHalfResult: null,
+  comingWeeksResult: null,
+  // predictions.json: { quarters, promoted, demoted, points: { [playerId]: { [opponentTeamName]: predictedPts } } }
+  predictions: null,
+  // team name -> [{ event, opponent }] for every fixture in the current season
+  teamFixtures: null,
   // Player-level "locks" set via the replace-player modal, one map per
   // context/role. Keyed by player id -> player object. Passed into the
   // optimizer on rebuild so it keeps these players and only re-solves the
@@ -35,6 +42,7 @@ const state = {
     valueHalf: new Map(),
     xiHalfStarters: new Map(),
     xiHalfBench: new Map(),
+    comingWeeks: new Map(),
   },
   // { player, context: 'value'|'xi'|'valueHalf'|'xiHalf', role: 'squad'|'starters'|'bench' } while open
   modal: null,
@@ -49,15 +57,42 @@ const el = (tag, cls, html) => {
 };
 
 async function loadData() {
-  const [players, meta] = await Promise.all([
+  const [players, meta, predictions, currentFixtures] = await Promise.all([
     fetch("data/players.json").then((r) => r.json()),
     fetch("data/meta.json").then((r) => r.json()),
+    fetch("data/predictions.json").then((r) => r.json()),
+    fetch("data/current_fixtures.json").then((r) => r.json()),
   ]);
   state.players = players;
   state.meta = meta;
+  state.predictions = predictions;
+
+  state.teamFixtures = {};
+  for (const f of currentFixtures) {
+    (state.teamFixtures[f.home] ||= []).push({ event: f.event, opponent: f.away });
+    (state.teamFixtures[f.away] ||= []).push({ event: f.event, opponent: f.home });
+  }
+
   $("#metaLine").textContent =
     `${meta.player_count} players • current: ${meta.current_season} • ` +
     `last season points from ${meta.last_season} (2nd half = ${meta.half_split.split(" vs ")[1]})`;
+}
+
+// Sums predictions.points[player][opponent] over every fixture that
+// player's current team plays between startWeek and endWeek (inclusive),
+// and stashes it on each player as `_predictedPoints` for the optimizer.
+function computePredictedPoints(startWeek, endWeek) {
+  const pointsByPlayer = state.predictions.points;
+  for (const p of state.players) {
+    const fixtures = state.teamFixtures[p.team] || [];
+    const oppPoints = pointsByPlayer[p.id] || {};
+    let sum = 0;
+    for (const fx of fixtures) {
+      if (fx.event < startWeek || fx.event > endWeek) continue;
+      sum += oppPoints[fx.opponent] || 0;
+    }
+    p._predictedPoints = Math.round(sum * 100) / 100;
+  }
 }
 
 function usablePlayers() {
@@ -121,7 +156,7 @@ function renderSquadTab(context) {
   if (cfg.isXI) {
     summary.appendChild(summaryStat(result.formation, "Formation"));
     summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Squad cost"));
-    summary.appendChild(summaryStat(result.xiPoints, `XI ${cfg.pointsLabel} (last szn)`));
+    summary.appendChild(summaryStat(result.xiPoints, `XI ${cfg.pointsLabel} (${cfg.periodLabel})`));
     summary.appendChild(summaryStat(`£${result.benchCost.toFixed(1)}m`, "Bench cost"));
     renderPitch($(ids.pitch), result.byPosition.starters, cfg.valueKey, cfg.pointsLabel, { context, role: "starters" });
     renderBench(
@@ -131,7 +166,7 @@ function renderSquadTab(context) {
     );
   } else {
     summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Total cost"));
-    summary.appendChild(summaryStat(result.totalPoints, `Total ${cfg.pointsLabel} (last szn)`));
+    summary.appendChild(summaryStat(result.totalPoints, `Total ${cfg.pointsLabel} (${cfg.periodLabel})`));
     summary.appendChild(summaryStat((result.totalPoints / result.totalCost).toFixed(1), "Pts per £m"));
     renderPitch($(ids.pitch), result.byPosition, cfg.valueKey, cfg.pointsLabel, { context, role: "squad" });
   }
@@ -161,6 +196,16 @@ function rebuildTeams() {
         fixedCount += fixed.starters.length + fixed.bench.length;
         state[cfg.resultKey] = buildStartingXIsquad(pool, budget, fixed, cfg.valueKey);
       }
+
+      const startWeek = parseInt($("#startWeekInput").value, 10);
+      const endWeek = parseInt($("#endWeekInput").value, 10);
+      if (!Number.isInteger(startWeek) || !Number.isInteger(endWeek) || startWeek < 1 || endWeek > 38 || startWeek > endWeek) {
+        throw new Error("Coming Weeks: Start GW and End GW must be between 1-38, with Start <= End.");
+      }
+      computePredictedPoints(startWeek, endWeek);
+      const comingWeeksFixed = [...state.fixed.comingWeeks.values()];
+      fixedCount += comingWeeksFixed.length;
+      state.comingWeeksResult = buildValueSquad(pool, budget, comingWeeksFixed, CONTEXTS.comingWeeks.valueKey);
 
       for (const context of Object.keys(CONTEXTS)) renderSquadTab(context);
 

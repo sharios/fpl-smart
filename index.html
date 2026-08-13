@@ -43,6 +43,7 @@
     <button class="tab" data-tab="xiSquad" role="tab">Best XI, Cheap Bench</button>
     <button class="tab" data-tab="valueHalfSquad" role="tab">Best Value (2nd Half)</button>
     <button class="tab" data-tab="xiHalfSquad" role="tab">Best XI (2nd Half)</button>
+    <button class="tab" data-tab="comingWeeksSquad" role="tab">Best Team, Coming Weeks</button>
     <button class="tab" data-tab="playerTable" role="tab">All Players</button>
   </nav>
 
@@ -72,6 +73,22 @@
     <h3 class="bench-heading">Bench (cheapest fillers)</h3>
     <div class="bench-row" id="xiHalfBench"></div>
     <p class="hint">Same as Best XI, Cheap Bench, but the starting XI is chosen to maximise second-half-of-season points (GW20-38) instead of the full season. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
+  </section>
+
+  <section id="comingWeeksSquad" class="tab-panel">
+    <div class="card controls">
+      <label class="budget-label" for="startWeekInput">
+        Start GW
+        <input type="number" id="startWeekInput" min="1" max="38" step="1" value="1" />
+      </label>
+      <label class="budget-label" for="endWeekInput">
+        End GW
+        <input type="number" id="endWeekInput" min="1" max="38" step="1" value="5" />
+      </label>
+    </div>
+    <div class="card summary-card" id="comingWeeksSummary"></div>
+    <div class="pitch" id="comingWeeksPitch"></div>
+    <p class="hint">Predicts each player's points per fixture against their opponent's last-season strength (by quarter of last season's final table), with dedicated logic for newly promoted/relegated clubs, then builds the 15-man squad that maximises total predicted points across Start&ndash;End gameweeks within budget. Change the GW range or budget and hit "Rebuild teams" above to recompute. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
   <section id="playerTable" class="tab-panel">
@@ -131,6 +148,7 @@
       <select id="modalSort">
         <option value="last_season_points">Sort: Points</option>
         <option value="last_season_half_points">Sort: 2nd-half points</option>
+        <option value="_predictedPoints">Sort: Predicted points (GW range)</option>
         <option value="pts_per_million">Sort: Points per &pound;m</option>
         <option value="half_pts_per_million">Sort: 2nd-half points per &pound;m</option>
         <option value="now_cost">Sort: Price</option>
