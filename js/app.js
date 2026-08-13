@@ -387,7 +387,24 @@ async function main() {
   $("#sortSelect").addEventListener("change", renderTable);
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    // If this load was already controlled by a service worker and a newer
+    // one takes over (i.e. a real deploy landed, not the first-ever
+    // install), reload once so the fresh cached assets take effect instead
+    // of silently sitting there until the next manual refresh.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloaded || !hadController) {
+        reloaded = true;
+        return;
+      }
+      reloaded = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker
+      .register("service-worker.js")
+      .then((reg) => reg.update().catch(() => {}))
+      .catch(() => {});
   }
 }
 
