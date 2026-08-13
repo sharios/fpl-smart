@@ -161,14 +161,14 @@ function convolve(a, costMax) {
 /** Groups a list of "must be in the squad" players by position and totals
  *  their cost/points, so callers can subtract them from the budget/quota
  *  before running the knapsack over the remaining pool. */
-function summarizeFixed(fixedPlayers) {
+function summarizeFixed(fixedPlayers, valueKey) {
   const byPos = { GK: [], DEF: [], MID: [], FWD: [] };
   const cost = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
   const points = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
   for (const p of fixedPlayers || []) {
     byPos[p.position].push(p);
     cost[p.position] += toTenths(p.now_cost);
-    points[p.position] += p.last_season_points || 0;
+    points[p.position] += p[valueKey] || 0;
   }
   return { byPos, cost, points };
 }
@@ -192,10 +192,14 @@ function enforceClubLimit(squadPlayers) {
  * they are always included in the returned squad, their cost is removed
  * from the budget up front, and their position's quota is reduced by the
  * number of fixed players in that position before the knapsack runs.
+ *
+ * `valueKey` (optional, default "last_season_points") selects which player
+ * field to maximise - pass "last_season_half_points" to optimise for the
+ * second half of the season instead of the full season.
  */
-function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
+function buildValueSquad(players, budgetMillions, fixedPlayers = [], valueKey = "last_season_points") {
   const budget = toTenths(budgetMillions);
-  const fixed = summarizeFixed(fixedPlayers);
+  const fixed = summarizeFixed(fixedPlayers, valueKey);
   const fixedIds = new Set(fixedPlayers.map((p) => p.id));
 
   for (const pos of Object.keys(POSITION_QUOTA)) {
@@ -222,7 +226,7 @@ function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
     const need = {};
     for (const pos of Object.keys(POSITION_QUOTA)) {
       need[pos] = POSITION_QUOTA[pos] - fixed.byPos[pos].length;
-      const items = toItems(groups[pos], "last_season_points");
+      const items = toItems(groups[pos], valueKey);
       tables[pos] = buildKnapsackTable(items, need[pos], remainingBudget);
     }
 
@@ -260,7 +264,7 @@ function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
 
     if (violations.length === 0) {
       const totalCost = squad.reduce((s, p) => s + p.now_cost, 0);
-      const totalPoints = squad.reduce((s, p) => s + p.last_season_points, 0);
+      const totalPoints = squad.reduce((s, p) => s + p[valueKey], 0);
       return { squad, totalCost, totalPoints, byPosition: chosen };
     }
 
@@ -269,7 +273,7 @@ function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
     for (const team of violations) {
       const clubPlayers = squad
         .filter((p) => p.team === team && !fixedIds.has(p.id))
-        .sort((a, b) => a.last_season_points - b.last_season_points);
+        .sort((a, b) => a[valueKey] - b[valueKey]);
       if (clubPlayers.length === 0) {
         throw new Error(`Cannot satisfy the ${MAX_PER_CLUB}-per-club limit because of fixed players from the same club.`);
       }
@@ -292,13 +296,17 @@ function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
  * the user has manually locked into a specific role. Fixed starters must
  * appear in the XI, fixed bench players must appear on the bench; both are
  * removed from the budget/quota up front, mirroring buildValueSquad.
+ *
+ * `valueKey` (optional, default "last_season_points") selects which player
+ * field to maximise for the starting XI - pass "last_season_half_points"
+ * to optimise for the second half of the season instead of the full season.
  */
-function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], bench: [] }) {
+function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], bench: [] }, valueKey = "last_season_points") {
   const fixedStarters = fixed.starters || [];
   const fixedBench = fixed.bench || [];
   const budget = toTenths(budgetMillions);
-  const fs = summarizeFixed(fixedStarters);
-  const fb = summarizeFixed(fixedBench);
+  const fs = summarizeFixed(fixedStarters, valueKey);
+  const fb = summarizeFixed(fixedBench, valueKey);
   const fixedIds = new Set([...fixedStarters, ...fixedBench].map((p) => p.id));
 
   for (const pos of Object.keys(POSITION_QUOTA)) {
@@ -325,7 +333,7 @@ function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], b
     const tables = {};
     const cheapestSorted = {};
     for (const pos of Object.keys(POSITION_QUOTA)) {
-      const items = toItems(groups[pos], "last_season_points");
+      const items = toItems(groups[pos], valueKey);
       tables[pos] = buildKnapsackTable(items, POSITION_QUOTA[pos], budget);
       cheapestSorted[pos] = [...groups[pos]].sort((a, b) => a.now_cost - b.now_cost);
     }
@@ -459,7 +467,7 @@ function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], b
 
     const violations = enforceClubLimit(squad);
     if (violations.length === 0) {
-      const xiPoints = xi.reduce((s, p) => s + p.last_season_points, 0);
+      const xiPoints = xi.reduce((s, p) => s + p[valueKey], 0);
       const benchCost = benchAll.reduce((s, p) => s + p.now_cost, 0);
       return {
         squad,
@@ -477,7 +485,7 @@ function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], b
     for (const team of violations) {
       const clubPlayers = squad
         .filter((p) => p.team === team && !fixedIds.has(p.id))
-        .sort((a, b) => a.last_season_points - b.last_season_points);
+        .sort((a, b) => a[valueKey] - b[valueKey]);
       if (clubPlayers.length === 0) {
         throw new Error(`Cannot satisfy the ${MAX_PER_CLUB}-per-club limit because of fixed players from the same club.`);
       }

@@ -1,20 +1,42 @@
-/* FPL Team Builder - UI wiring. Loads players.json, runs the two squad
+/* FPL Team Builder - UI wiring. Loads players.json, runs the squad
  * strategies from optimizer.js, and renders the pitch views + player table. */
+
+// Four squad tabs share the same rendering/fixing logic; they differ only in
+// which optimizer they call and which player field they maximise.
+const CONTEXTS = {
+  value: { resultKey: "valueResult", isXI: false, valueKey: "last_season_points", pointsLabel: "pts" },
+  xi: { resultKey: "xiResult", isXI: true, valueKey: "last_season_points", pointsLabel: "pts" },
+  valueHalf: { resultKey: "valueHalfResult", isXI: false, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts" },
+  xiHalf: { resultKey: "xiHalfResult", isXI: true, valueKey: "last_season_half_points", pointsLabel: "2nd-half pts" },
+};
+
+const DOM_IDS = {
+  value: { summary: "#valueSummary", pitch: "#valuePitch" },
+  xi: { summary: "#xiSummary", pitch: "#xiPitch", bench: "#xiBench" },
+  valueHalf: { summary: "#valueHalfSummary", pitch: "#valueHalfPitch" },
+  xiHalf: { summary: "#xiHalfSummary", pitch: "#xiHalfPitch", bench: "#xiHalfBench" },
+};
 
 const state = {
   players: [],
   meta: null,
   valueResult: null,
   xiResult: null,
-  // Player-level "locks" set via the replace-player modal. Keyed by player
-  // id -> player object. Passed into the optimizer on rebuild so it keeps
-  // these players and only re-solves the remaining budget/slots.
+  valueHalfResult: null,
+  xiHalfResult: null,
+  // Player-level "locks" set via the replace-player modal, one map per
+  // context/role. Keyed by player id -> player object. Passed into the
+  // optimizer on rebuild so it keeps these players and only re-solves the
+  // remaining budget/slots.
   fixed: {
     value: new Map(),
     xiStarters: new Map(),
     xiBench: new Map(),
+    valueHalf: new Map(),
+    xiHalfStarters: new Map(),
+    xiHalfBench: new Map(),
   },
-  // { player, context: 'value'|'xi', role: 'squad'|'starters'|'bench' } while open
+  // { player, context: 'value'|'xi'|'valueHalf'|'xiHalf', role: 'squad'|'starters'|'bench' } while open
   modal: null,
 };
 
@@ -43,8 +65,9 @@ function usablePlayers() {
 }
 
 function fixedMapFor(context, role) {
-  if (context === "value") return state.fixed.value;
-  return role === "starters" ? state.fixed.xiStarters : state.fixed.xiBench;
+  if (role === "starters") return state.fixed[`${context}Starters`];
+  if (role === "bench") return state.fixed[`${context}Bench`];
+  return state.fixed[context]; // role === "squad"
 }
 
 function chip(p, statKey, statLabel, ctx) {
@@ -88,26 +111,30 @@ function summaryStat(val, lbl) {
   return s;
 }
 
-function renderValueSquad(result) {
-  const summary = $("#valueSummary");
+function renderSquadTab(context) {
+  const cfg = CONTEXTS[context];
+  const ids = DOM_IDS[context];
+  const result = state[cfg.resultKey];
+  const summary = $(ids.summary);
   summary.innerHTML = "";
-  summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Total cost"));
-  summary.appendChild(summaryStat(result.totalPoints, "Total pts (last szn)"));
-  summary.appendChild(summaryStat((result.totalPoints / result.totalCost).toFixed(1), "Pts per £m"));
-  renderPitch($("#valuePitch"), result.byPosition, "last_season_points", "pts", { context: "value", role: "squad" });
-}
 
-function renderXISquad(result) {
-  const summary = $("#xiSummary");
-  summary.innerHTML = "";
-  summary.appendChild(summaryStat(result.formation, "Formation"));
-  summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Squad cost"));
-  summary.appendChild(summaryStat(result.xiPoints, "XI pts (last szn)"));
-  summary.appendChild(summaryStat(`£${result.benchCost.toFixed(1)}m`, "Bench cost"));
-  renderPitch($("#xiPitch"), result.byPosition.starters, "last_season_points", "pts", { context: "xi", role: "starters" });
-  renderBench($("#xiBench"), result.byPosition.bench.GK
-    .concat(result.byPosition.bench.DEF, result.byPosition.bench.MID, result.byPosition.bench.FWD),
-    { context: "xi", role: "bench" });
+  if (cfg.isXI) {
+    summary.appendChild(summaryStat(result.formation, "Formation"));
+    summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Squad cost"));
+    summary.appendChild(summaryStat(result.xiPoints, `XI ${cfg.pointsLabel} (last szn)`));
+    summary.appendChild(summaryStat(`£${result.benchCost.toFixed(1)}m`, "Bench cost"));
+    renderPitch($(ids.pitch), result.byPosition.starters, cfg.valueKey, cfg.pointsLabel, { context, role: "starters" });
+    renderBench(
+      $(ids.bench),
+      result.byPosition.bench.GK.concat(result.byPosition.bench.DEF, result.byPosition.bench.MID, result.byPosition.bench.FWD),
+      { context, role: "bench" }
+    );
+  } else {
+    summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Total cost"));
+    summary.appendChild(summaryStat(result.totalPoints, `Total ${cfg.pointsLabel} (last szn)`));
+    summary.appendChild(summaryStat((result.totalPoints / result.totalCost).toFixed(1), "Pts per £m"));
+    renderPitch($(ids.pitch), result.byPosition, cfg.valueKey, cfg.pointsLabel, { context, role: "squad" });
+  }
 }
 
 function rebuildTeams() {
@@ -117,20 +144,28 @@ function rebuildTeams() {
   setTimeout(() => {
     try {
       const pool = usablePlayers();
-      const valueFixed = [...state.fixed.value.values()];
-      const xiFixed = {
-        starters: [...state.fixed.xiStarters.values()],
-        bench: [...state.fixed.xiBench.values()],
-      };
-      const valueResult = buildValueSquad(pool, budget, valueFixed);
-      const xiResult = buildStartingXIsquad(pool, budget, xiFixed);
-      state.valueResult = valueResult;
-      state.xiResult = xiResult;
-      renderValueSquad(valueResult);
-      renderXISquad(xiResult);
-      const fixedCount = valueFixed.length + xiFixed.starters.length + xiFixed.bench.length;
-      statusMsg.textContent = `Updated for £${budget.toFixed(1)}m budget.` +
-        (fixedCount ? ` ${fixedCount} fixed player(s) kept.` : "");
+      let fixedCount = 0;
+
+      for (const context of ["value", "valueHalf"]) {
+        const cfg = CONTEXTS[context];
+        const fixedPlayers = [...state.fixed[context].values()];
+        fixedCount += fixedPlayers.length;
+        state[cfg.resultKey] = buildValueSquad(pool, budget, fixedPlayers, cfg.valueKey);
+      }
+      for (const context of ["xi", "xiHalf"]) {
+        const cfg = CONTEXTS[context];
+        const fixed = {
+          starters: [...state.fixed[`${context}Starters`].values()],
+          bench: [...state.fixed[`${context}Bench`].values()],
+        };
+        fixedCount += fixed.starters.length + fixed.bench.length;
+        state[cfg.resultKey] = buildStartingXIsquad(pool, budget, fixed, cfg.valueKey);
+      }
+
+      for (const context of Object.keys(CONTEXTS)) renderSquadTab(context);
+
+      statusMsg.textContent =
+        `Updated for £${budget.toFixed(1)}m budget.` + (fixedCount ? ` ${fixedCount} fixed player(s) kept.` : "");
     } catch (err) {
       console.error(err);
       statusMsg.textContent = err.message || "Could not build a squad for that budget - try a higher value.";
@@ -174,7 +209,7 @@ function renderTable() {
 }
 
 function currentSquadIds(context) {
-  const result = context === "value" ? state.valueResult : state.xiResult;
+  const result = state[CONTEXTS[context].resultKey];
   return new Set(result.squad.map((p) => p.id));
 }
 
@@ -205,7 +240,7 @@ function openPlayerModal(player, ctx) {
   $("#modalPriceVal").textContent = priceInput.value;
 
   $("#modalSearch").value = "";
-  $("#modalSort").value = "last_season_points";
+  $("#modalSort").value = CONTEXTS[ctx.context].valueKey;
 
   renderModalList();
   $("#playerModal").classList.remove("hidden");
@@ -220,6 +255,7 @@ function renderModalList() {
   const list = $("#modalList");
   if (!state.modal) return;
   const { player, context } = state.modal;
+  const cfg = CONTEXTS[context];
 
   const q = $("#modalSearch").value.trim().toLowerCase();
   const club = $("#modalClubFilter").value;
@@ -254,38 +290,39 @@ function renderModalList() {
     row.appendChild(el("span", "mr-name", `${p.web_name}${isCurrent ? " <small>(current)</small>" : ""}`));
     row.appendChild(el("span", "mr-club", p.team_short));
     row.appendChild(el("span", "mr-cost", `£${p.now_cost.toFixed(1)}m`));
-    row.appendChild(el("span", "mr-pts", `${p.last_season_points} pts`));
+    row.appendChild(el("span", "mr-pts", `${p[cfg.valueKey]} ${cfg.pointsLabel}`));
     row.addEventListener("click", () => selectReplacement(p));
     list.appendChild(row);
   }
 }
 
 function swapPlayerInSquad(context, role, oldPlayer, newPlayer) {
+  const cfg = CONTEXTS[context];
+  const result = state[cfg.resultKey];
   const pos = oldPlayer.position;
   const posOrder = ["GK", "DEF", "MID", "FWD"];
 
-  if (context === "value") {
-    const arr = state.valueResult.byPosition[pos];
+  if (!cfg.isXI) {
+    const arr = result.byPosition[pos];
     const idx = arr.findIndex((p) => p.id === oldPlayer.id);
     if (idx === -1) return;
     arr[idx] = newPlayer;
-    state.valueResult.squad = posOrder.flatMap((p) => state.valueResult.byPosition[p]);
-    state.valueResult.totalCost = state.valueResult.squad.reduce((s, p) => s + p.now_cost, 0);
-    state.valueResult.totalPoints = state.valueResult.squad.reduce((s, p) => s + p.last_season_points, 0);
-    renderValueSquad(state.valueResult);
+    result.squad = posOrder.flatMap((p) => result.byPosition[p]);
+    result.totalCost = result.squad.reduce((s, p) => s + p.now_cost, 0);
+    result.totalPoints = result.squad.reduce((s, p) => s + p[cfg.valueKey], 0);
   } else {
-    const arr = state.xiResult.byPosition[role][pos];
+    const arr = result.byPosition[role][pos];
     const idx = arr.findIndex((p) => p.id === oldPlayer.id);
     if (idx === -1) return;
     arr[idx] = newPlayer;
-    state.xiResult.starters = posOrder.flatMap((p) => state.xiResult.byPosition.starters[p]);
-    state.xiResult.bench = posOrder.flatMap((p) => state.xiResult.byPosition.bench[p]);
-    state.xiResult.squad = [...state.xiResult.starters, ...state.xiResult.bench];
-    state.xiResult.totalCost = state.xiResult.squad.reduce((s, p) => s + p.now_cost, 0);
-    state.xiResult.xiPoints = state.xiResult.starters.reduce((s, p) => s + p.last_season_points, 0);
-    state.xiResult.benchCost = state.xiResult.bench.reduce((s, p) => s + p.now_cost, 0);
-    renderXISquad(state.xiResult);
+    result.starters = posOrder.flatMap((p) => result.byPosition.starters[p]);
+    result.bench = posOrder.flatMap((p) => result.byPosition.bench[p]);
+    result.squad = [...result.starters, ...result.bench];
+    result.totalCost = result.squad.reduce((s, p) => s + p.now_cost, 0);
+    result.xiPoints = result.starters.reduce((s, p) => s + p[cfg.valueKey], 0);
+    result.benchCost = result.bench.reduce((s, p) => s + p.now_cost, 0);
   }
+  renderSquadTab(context);
 }
 
 function selectReplacement(newPlayer) {
@@ -305,8 +342,7 @@ function unfixCurrentModalPlayer() {
   const { player, context, role } = state.modal;
   fixedMapFor(context, role).delete(player.id);
   closePlayerModal();
-  if (context === "value") renderValueSquad(state.valueResult);
-  else renderXISquad(state.xiResult);
+  renderSquadTab(context);
 }
 
 function wireModal() {

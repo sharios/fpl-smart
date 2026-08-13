@@ -41,6 +41,8 @@
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="valueSquad" role="tab">Best Value Squad</button>
     <button class="tab" data-tab="xiSquad" role="tab">Best XI, Cheap Bench</button>
+    <button class="tab" data-tab="valueHalfSquad" role="tab">Best Value (2nd Half)</button>
+    <button class="tab" data-tab="xiHalfSquad" role="tab">Best XI (2nd Half)</button>
     <button class="tab" data-tab="playerTable" role="tab">All Players</button>
   </nav>
 
@@ -56,6 +58,20 @@
     <h3 class="bench-heading">Bench (cheapest fillers)</h3>
     <div class="bench-row" id="xiBench"></div>
     <p class="hint">The 11 starters are chosen to maximise points in a valid formation; the 4 bench players are the cheapest available for their position so more budget goes to the starting XI. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
+  </section>
+
+  <section id="valueHalfSquad" class="tab-panel">
+    <div class="card summary-card" id="valueHalfSummary"></div>
+    <div class="pitch" id="valueHalfPitch"></div>
+    <p class="hint">Same as Best Value Squad, but optimised on second-half-of-season points only (GW20-38) instead of the full season. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
+  </section>
+
+  <section id="xiHalfSquad" class="tab-panel">
+    <div class="card summary-card" id="xiHalfSummary"></div>
+    <div class="pitch" id="xiHalfPitch"></div>
+    <h3 class="bench-heading">Bench (cheapest fillers)</h3>
+    <div class="bench-row" id="xiHalfBench"></div>
+    <p class="hint">Same as Best XI, Cheap Bench, but the starting XI is chosen to maximise second-half-of-season points (GW20-38) instead of the full season. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
   <section id="playerTable" class="tab-panel">
@@ -114,7 +130,9 @@
       <select id="modalClubFilter"><option value="">All clubs</option></select>
       <select id="modalSort">
         <option value="last_season_points">Sort: Points</option>
+        <option value="last_season_half_points">Sort: 2nd-half points</option>
         <option value="pts_per_million">Sort: Points per &pound;m</option>
+        <option value="half_pts_per_million">Sort: 2nd-half points per &pound;m</option>
         <option value="now_cost">Sort: Price</option>
       </select>
       <label class="modal-price-filter">
