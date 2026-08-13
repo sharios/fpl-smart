@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FPL Team Builder</title>
+<meta name="description" content="Build the optimal Fantasy Premier League squad from last season's data." />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#37003c" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="FPL Builder" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
+
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <h1>FPL Team Builder</h1>
+  </div>
+  <p class="meta-line" id="metaLine">Loading data&hellip;</p>
+</header>
+
+<main>
+  <section class="controls card">
+    <label class="budget-label" for="budgetInput">
+      Budget (&pound;m)
+      <input type="number" id="budgetInput" min="80" max="100" step="0.1" value="100.0" />
+    </label>
+    <button id="rebuildBtn" class="btn btn-primary">Rebuild teams</button>
+    <span id="statusMsg" class="status-msg"></span>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="valueSquad" role="tab">Best Value Squad</button>
+    <button class="tab" data-tab="xiSquad" role="tab">Best XI, Cheap Bench</button>
+    <button class="tab" data-tab="playerTable" role="tab">All Players</button>
+  </nav>
+
+  <section id="valueSquad" class="tab-panel active">
+    <div class="card summary-card" id="valueSummary"></div>
+    <div class="pitch" id="valuePitch"></div>
+    <p class="hint">All 15 squad players count toward total points &mdash; this is the squad that maximises total last-season points within budget.</p>
+  </section>
+
+  <section id="xiSquad" class="tab-panel">
+    <div class="card summary-card" id="xiSummary"></div>
+    <div class="pitch" id="xiPitch"></div>
+    <h3 class="bench-heading">Bench (cheapest fillers)</h3>
+    <div class="bench-row" id="xiBench"></div>
+    <p class="hint">The 11 starters are chosen to maximise points in a valid formation; the 4 bench players are the cheapest available for their position so more budget goes to the starting XI.</p>
+  </section>
+
+  <section id="playerTable" class="tab-panel">
+    <div class="card table-controls">
+      <input type="text" id="searchInput" placeholder="Search player or club&hellip;" />
+      <select id="positionFilter">
+        <option value="">All positions</option>
+        <option value="GK">GK</option>
+        <option value="DEF">DEF</option>
+        <option value="MID">MID</option>
+        <option value="FWD">FWD</option>
+      </select>
+      <select id="sortSelect">
+        <option value="last_season_points">Sort: Last season points</option>
+        <option value="pts_per_million">Sort: Points per &pound;m</option>
+        <option value="half_pts_per_million">Sort: 2nd-half points per &pound;m</option>
+        <option value="now_cost">Sort: Current price</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table id="playersTable">
+        <thead>
+          <tr>
+            <th>Player</th><th>Pos</th><th>Club</th><th>&pound;m</th>
+            <th>Last season club</th><th>Last season pts</th><th>2nd half pts</th>
+            <th>Pts/&pound;m</th><th>2nd-half Pts/&pound;m</th>
+          </tr>
+        </thead>
+        <tbody id="playersTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <p>Data: current prices &amp; clubs from the FPL API snapshot; last-season points from completed gameweek data. Squad rules: 2 GK / 5 DEF / 5 MID / 3 FWD, max 3 players per club.</p>
+</footer>
+
+<script src="js/optimizer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

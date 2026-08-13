@@ -1,0 +1,30 @@
+{
+  "current_season": "2026-27",
+  "last_season": "2025-26",
+  "half_split": "GW1-19 vs GW20-38",
+  "player_count": 567,
+  "matched_to_last_season": 457,
+  "new_to_pl": 110,
+  "current_teams": [
+    "Arsenal",
+    "Aston Villa",
+    "Bournemouth",
+    "Brentford",
+    "Brighton",
+    "Chelsea",
+    "Coventry City",
+    "Crystal Palace",
+    "Everton",
+    "Fulham",
+    "Hull City",
+    "Ipswich Town",
+    "Leeds",
+    "Liverpool",
+    "Man City",
+    "Man Utd",
+    "Newcastle",
+    "Nott'm Forest",
+    "Spurs",
+    "Sunderland"
+  ]
+}
