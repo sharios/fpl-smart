@@ -158,6 +158,21 @@ function convolve(a, costMax) {
   return { get: acc.get, splits };
 }
 
+/** Groups a list of "must be in the squad" players by position and totals
+ *  their cost/points, so callers can subtract them from the budget/quota
+ *  before running the knapsack over the remaining pool. */
+function summarizeFixed(fixedPlayers) {
+  const byPos = { GK: [], DEF: [], MID: [], FWD: [] };
+  const cost = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+  const points = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+  for (const p of fixedPlayers || []) {
+    byPos[p.position].push(p);
+    cost[p.position] += toTenths(p.now_cost);
+    points[p.position] += p.last_season_points || 0;
+  }
+  return { byPos, cost, points };
+}
+
 function enforceClubLimit(squadPlayers) {
   const counts = {};
   for (const p of squadPlayers) counts[p.team] = (counts[p.team] || 0) + 1;
@@ -172,41 +187,60 @@ function enforceClubLimit(squadPlayers) {
  * Strategy A: maximise total squad points under budget + quota + club
  * constraints. Uses constraint-generation: solve, check club limits, ban
  * the weakest offending player and resolve, repeat until feasible.
+ *
+ * `fixedPlayers` (optional) are players the user has manually locked in -
+ * they are always included in the returned squad, their cost is removed
+ * from the budget up front, and their position's quota is reduced by the
+ * number of fixed players in that position before the knapsack runs.
  */
-function buildValueSquad(players, budgetMillions) {
+function buildValueSquad(players, budgetMillions, fixedPlayers = []) {
   const budget = toTenths(budgetMillions);
+  const fixed = summarizeFixed(fixedPlayers);
+  const fixedIds = new Set(fixedPlayers.map((p) => p.id));
+
+  for (const pos of Object.keys(POSITION_QUOTA)) {
+    if (fixed.byPos[pos].length > POSITION_QUOTA[pos]) {
+      throw new Error(`Too many fixed ${pos} players for the squad quota.`);
+    }
+  }
+  const fixedTotalCost = Object.values(fixed.cost).reduce((a, b) => a + b, 0);
+  if (fixedTotalCost > budget) {
+    throw new Error("Fixed players cost more than the total budget.");
+  }
+  const remainingBudget = budget - fixedTotalCost;
+
   const banned = new Set();
   let attempt = 0;
   const MAX_ATTEMPTS = 40;
 
   while (attempt < MAX_ATTEMPTS) {
     attempt += 1;
-    const pool = players.filter((p) => !banned.has(p.id) && p.now_cost > 0);
+    const pool = players.filter((p) => !banned.has(p.id) && !fixedIds.has(p.id) && p.now_cost > 0);
     const groups = groupByPosition(pool);
 
     const tables = {};
+    const need = {};
     for (const pos of Object.keys(POSITION_QUOTA)) {
+      need[pos] = POSITION_QUOTA[pos] - fixed.byPos[pos].length;
       const items = toItems(groups[pos], "last_season_points");
-      tables[pos] = buildKnapsackTable(items, POSITION_QUOTA[pos], budget);
+      tables[pos] = buildKnapsackTable(items, need[pos], remainingBudget);
     }
 
     const posOrder = ["GK", "DEF", "MID", "FWD"];
     const arrays = posOrder.map((pos) => ({
-      get: (c) => tables[pos].get(POSITION_QUOTA[pos], c),
+      get: (c) => tables[pos].get(need[pos], c),
     }));
-    const combined = convolve(arrays, budget);
-    const bestValue = combined.get(budget);
+    const combined = convolve(arrays, remainingBudget);
+    const bestValue = combined.get(remainingBudget);
 
     if (bestValue === -Infinity) {
       throw new Error("No feasible squad found within budget.");
     }
 
     // recover the cost split across the 4 positions
-    const splitCosts = new Array(posOrder.length).fill(0);
-    let remaining = budget;
     // combined.splits[i] holds the cost given to the *accumulated* first
     // (i+1) positions at each total cost; walk backwards.
-    let accCost = budget;
+    let accCost = remainingBudget;
     const perPosCost = [];
     for (let i = combined.splits.length; i >= 1; i--) {
       const used = combined.splits[i - 1][accCost];
@@ -218,7 +252,7 @@ function buildValueSquad(players, budgetMillions) {
     const chosen = {};
     for (let i = 0; i < posOrder.length; i++) {
       const pos = posOrder[i];
-      chosen[pos] = tables[pos].reconstruct(POSITION_QUOTA[pos], perPosCost[i]);
+      chosen[pos] = [...fixed.byPos[pos], ...tables[pos].reconstruct(need[pos], perPosCost[i])];
     }
 
     const squad = posOrder.flatMap((pos) => chosen[pos]);
@@ -230,12 +264,20 @@ function buildValueSquad(players, budgetMillions) {
       return { squad, totalCost, totalPoints, byPosition: chosen };
     }
 
-    // ban the weakest player from the most-over-represented club
+    // ban the weakest non-fixed player from the most-over-represented club
+    let bannedSomething = false;
     for (const team of violations) {
       const clubPlayers = squad
-        .filter((p) => p.team === team)
+        .filter((p) => p.team === team && !fixedIds.has(p.id))
         .sort((a, b) => a.last_season_points - b.last_season_points);
+      if (clubPlayers.length === 0) {
+        throw new Error(`Cannot satisfy the ${MAX_PER_CLUB}-per-club limit because of fixed players from the same club.`);
+      }
       banned.add(clubPlayers[0].id);
+      bannedSomething = true;
+    }
+    if (!bannedSomething) {
+      throw new Error("Could not satisfy club-limit constraint with the current fixed players.");
     }
   }
   throw new Error("Could not satisfy club-limit constraint within attempt budget.");
@@ -245,16 +287,39 @@ function buildValueSquad(players, budgetMillions) {
  * Strategy B: maximise the points of the best starting XI while keeping
  * the 4 bench slots as cheap as possible, under the same budget/quota/
  * club constraints.
+ *
+ * `fixed` (optional) is `{ starters: Player[], bench: Player[] }` - players
+ * the user has manually locked into a specific role. Fixed starters must
+ * appear in the XI, fixed bench players must appear on the bench; both are
+ * removed from the budget/quota up front, mirroring buildValueSquad.
  */
-function buildStartingXIsquad(players, budgetMillions) {
+function buildStartingXIsquad(players, budgetMillions, fixed = { starters: [], bench: [] }) {
+  const fixedStarters = fixed.starters || [];
+  const fixedBench = fixed.bench || [];
   const budget = toTenths(budgetMillions);
+  const fs = summarizeFixed(fixedStarters);
+  const fb = summarizeFixed(fixedBench);
+  const fixedIds = new Set([...fixedStarters, ...fixedBench].map((p) => p.id));
+
+  for (const pos of Object.keys(POSITION_QUOTA)) {
+    if (fs.byPos[pos].length + fb.byPos[pos].length > POSITION_QUOTA[pos]) {
+      throw new Error(`Too many fixed ${pos} players for the squad quota.`);
+    }
+  }
+  const fixedTotalCost =
+    Object.values(fs.cost).reduce((a, b) => a + b, 0) +
+    Object.values(fb.cost).reduce((a, b) => a + b, 0);
+  if (fixedTotalCost > budget) {
+    throw new Error("Fixed players cost more than the total budget.");
+  }
+
   const banned = new Set();
   let attempt = 0;
   const MAX_ATTEMPTS = 40;
 
   while (attempt < MAX_ATTEMPTS) {
     attempt += 1;
-    const pool = players.filter((p) => !banned.has(p.id) && p.now_cost > 0);
+    const pool = players.filter((p) => !banned.has(p.id) && !fixedIds.has(p.id) && p.now_cost > 0);
     const groups = groupByPosition(pool);
 
     const tables = {};
@@ -265,13 +330,13 @@ function buildStartingXIsquad(players, budgetMillions) {
       cheapestSorted[pos] = [...groups[pos]].sort((a, b) => a.now_cost - b.now_cost);
     }
 
-    function benchCostEstimate(pos, s) {
-      const need = POSITION_QUOTA[pos] - s;
+    function nonFixedBenchCostEstimate(pos, need) {
       if (need <= 0) return 0;
       // cheapest `need` players, ignoring overlap with starters (fixed up
       // exactly at reconstruction time).
       let sum = 0;
       for (let i = 0; i < need; i++) {
+        if (!cheapestSorted[pos][i]) return Infinity; // not enough players left
         sum += toTenths(cheapestSorted[pos][i].now_cost);
       }
       return sum;
@@ -296,21 +361,46 @@ function buildStartingXIsquad(players, budgetMillions) {
         { pos: "MID", s: sMid },
         { pos: "FWD", s: sFwd },
       ];
-      const benchEst = posSpecs.map((sp) => benchCostEstimate(sp.pos, sp.s));
+
+      // A formation is only feasible if it has enough starter slots for
+      // the fixed starters in each position, and enough bench slots left
+      // over for the fixed bench players in each position.
+      let feasible = true;
+      const nonFixedStarterNeed = {};
+      const nonFixedBenchNeed = {};
+      for (const sp of posSpecs) {
+        const fsCount = fs.byPos[sp.pos].length;
+        const fbCount = fb.byPos[sp.pos].length;
+        if (sp.s < fsCount) { feasible = false; break; }
+        const benchSlots = POSITION_QUOTA[sp.pos] - sp.s;
+        if (benchSlots < fbCount) { feasible = false; break; }
+        nonFixedStarterNeed[sp.pos] = sp.s - fsCount;
+        nonFixedBenchNeed[sp.pos] = benchSlots - fbCount;
+      }
+      if (!feasible) continue;
+
+      const benchEst = posSpecs.map((sp) => {
+        const est = nonFixedBenchCostEstimate(sp.pos, nonFixedBenchNeed[sp.pos]);
+        return est === Infinity ? Infinity : est + fb.cost[sp.pos];
+      });
+      if (benchEst.some((e) => e === Infinity)) continue;
+
       // curve(C) = best starter points for this position with TOTAL cost
-      // (starters + estimated bench) <= C
+      // (fixed starters + non-fixed starters + estimated bench) <= C
       const arrays = posSpecs.map((sp, i) => ({
         get: (C) => {
-          const starterBudget = C - benchEst[i];
+          const starterBudget = C - benchEst[i] - fs.cost[sp.pos];
           if (starterBudget < 0) return -Infinity;
-          return tables[sp.pos].get(sp.s, starterBudget);
+          const val = tables[sp.pos].get(nonFixedStarterNeed[sp.pos], starterBudget);
+          if (val === -Infinity) return -Infinity;
+          return val + fs.points[sp.pos];
         },
       }));
       const combined = convolve(arrays, budget);
       const val = combined.get(budget);
       if (val === -Infinity) continue;
       if (!best || val > best.val) {
-        best = { val, sDef, sMid, sFwd, combined, posSpecs, benchEst };
+        best = { val, sDef, sMid, sFwd, combined, posSpecs, benchEst, nonFixedStarterNeed, nonFixedBenchNeed };
       }
     }
 
@@ -329,18 +419,22 @@ function buildStartingXIsquad(players, budgetMillions) {
     const starters = {};
     const bench = {};
     for (let i = 0; i < best.posSpecs.length; i++) {
-      const { pos, s } = best.posSpecs[i];
-      const starterBudget = perPosCost[i] - best.benchEst[i];
-      const chosenStarters = tables[pos].reconstruct(s, Math.max(0, starterBudget));
-      starters[pos] = chosenStarters;
-      const chosenIds = new Set(chosenStarters.map((p) => p.id));
-      const need = POSITION_QUOTA[pos] - s;
+      const { pos } = best.posSpecs[i];
+      const starterBudget = perPosCost[i] - best.benchEst[i] - fs.cost[pos];
+      const chosenNonFixedStarters = tables[pos].reconstruct(
+        best.nonFixedStarterNeed[pos],
+        Math.max(0, starterBudget)
+      );
+      starters[pos] = [...fs.byPos[pos], ...chosenNonFixedStarters];
+
+      const chosenIds = new Set(chosenNonFixedStarters.map((p) => p.id));
+      const need = best.nonFixedBenchNeed[pos];
       const benchPlayers = [];
       for (const cand of cheapestSorted[pos]) {
         if (benchPlayers.length >= need) break;
         if (!chosenIds.has(cand.id)) benchPlayers.push(cand);
       }
-      bench[pos] = benchPlayers;
+      bench[pos] = [...fb.byPos[pos], ...benchPlayers];
     }
 
     const posOrder = ["GK", "DEF", "MID", "FWD"];
@@ -351,10 +445,16 @@ function buildStartingXIsquad(players, budgetMillions) {
     const totalCost = squad.reduce((s, p) => s + p.now_cost, 0);
     if (totalCost > budgetMillions + 1e-9) {
       // extremely rare estimate/exclusion mismatch - ban the cheapest
-      // overlap-prone player and retry rather than show an over-budget XI.
-      const offender = cheapestSorted.DEF[0] || cheapestSorted.MID[0];
-      if (offender) banned.add(offender.id);
-      continue;
+      // non-fixed overlap-prone player and retry rather than show an
+      // over-budget XI.
+      const offender =
+        cheapestSorted.DEF.find((p) => !fixedIds.has(p.id)) ||
+        cheapestSorted.MID.find((p) => !fixedIds.has(p.id));
+      if (offender) {
+        banned.add(offender.id);
+        continue;
+      }
+      throw new Error("Could not satisfy the budget with the current fixed players.");
     }
 
     const violations = enforceClubLimit(squad);
@@ -373,11 +473,19 @@ function buildStartingXIsquad(players, budgetMillions) {
       };
     }
 
+    let bannedSomething = false;
     for (const team of violations) {
       const clubPlayers = squad
-        .filter((p) => p.team === team)
+        .filter((p) => p.team === team && !fixedIds.has(p.id))
         .sort((a, b) => a.last_season_points - b.last_season_points);
+      if (clubPlayers.length === 0) {
+        throw new Error(`Cannot satisfy the ${MAX_PER_CLUB}-per-club limit because of fixed players from the same club.`);
+      }
       banned.add(clubPlayers[0].id);
+      bannedSomething = true;
+    }
+    if (!bannedSomething) {
+      throw new Error("Could not satisfy club-limit constraint with the current fixed players.");
     }
   }
   throw new Error("Could not satisfy club-limit constraint within attempt budget.");

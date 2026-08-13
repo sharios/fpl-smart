@@ -1,7 +1,22 @@
 /* FPL Team Builder - UI wiring. Loads players.json, runs the two squad
  * strategies from optimizer.js, and renders the pitch views + player table. */
 
-const state = { players: [], meta: null, valueResult: null, xiResult: null };
+const state = {
+  players: [],
+  meta: null,
+  valueResult: null,
+  xiResult: null,
+  // Player-level "locks" set via the replace-player modal. Keyed by player
+  // id -> player object. Passed into the optimizer on rebuild so it keeps
+  // these players and only re-solves the remaining budget/slots.
+  fixed: {
+    value: new Map(),
+    xiStarters: new Map(),
+    xiBench: new Map(),
+  },
+  // { player, context: 'value'|'xi', role: 'squad'|'starters'|'bench' } while open
+  modal: null,
+};
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -27,31 +42,43 @@ function usablePlayers() {
   return state.players.filter((p) => p.status !== "u");
 }
 
-function chip(p, statKey, statLabel) {
+function fixedMapFor(context, role) {
+  if (context === "value") return state.fixed.value;
+  return role === "starters" ? state.fixed.xiStarters : state.fixed.xiBench;
+}
+
+function chip(p, statKey, statLabel, ctx) {
   const c = el("div", "player-chip");
   const posBadge = el("span", `pos-badge ${p.position}`, p.position);
   c.appendChild(posBadge);
   c.appendChild(el("span", "pname", p.web_name));
   c.appendChild(el("span", "pclub", `${p.team_short} £${p.now_cost.toFixed(1)}m`));
   c.appendChild(el("span", "pstat", `${p[statKey]} ${statLabel}`));
+  if (ctx) {
+    if (fixedMapFor(ctx.context, ctx.role).has(p.id)) {
+      c.classList.add("fixed");
+      c.appendChild(el("span", "pin-badge", "FIXED"));
+    }
+    c.addEventListener("click", () => openPlayerModal(p, ctx));
+  }
   return c;
 }
 
-function renderPitch(container, byPosition, statKey, statLabel) {
+function renderPitch(container, byPosition, statKey, statLabel, ctx) {
   container.innerHTML = "";
   const order = ["GK", "DEF", "MID", "FWD"];
   for (const pos of order) {
     const players = byPosition[pos] || [];
     if (!players.length) continue;
     const row = el("div", "pitch-row");
-    for (const p of players) row.appendChild(chip(p, statKey, statLabel));
+    for (const p of players) row.appendChild(chip(p, statKey, statLabel, ctx));
     container.appendChild(row);
   }
 }
 
-function renderBench(container, benchPlayers) {
+function renderBench(container, benchPlayers, ctx) {
   container.innerHTML = "";
-  for (const p of benchPlayers) container.appendChild(chip(p, "now_cost", ""));
+  for (const p of benchPlayers) container.appendChild(chip(p, "now_cost", "", ctx));
 }
 
 function summaryStat(val, lbl) {
@@ -67,7 +94,7 @@ function renderValueSquad(result) {
   summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Total cost"));
   summary.appendChild(summaryStat(result.totalPoints, "Total pts (last szn)"));
   summary.appendChild(summaryStat((result.totalPoints / result.totalCost).toFixed(1), "Pts per £m"));
-  renderPitch($("#valuePitch"), result.byPosition, "last_season_points", "pts");
+  renderPitch($("#valuePitch"), result.byPosition, "last_season_points", "pts", { context: "value", role: "squad" });
 }
 
 function renderXISquad(result) {
@@ -77,9 +104,10 @@ function renderXISquad(result) {
   summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Squad cost"));
   summary.appendChild(summaryStat(result.xiPoints, "XI pts (last szn)"));
   summary.appendChild(summaryStat(`£${result.benchCost.toFixed(1)}m`, "Bench cost"));
-  renderPitch($("#xiPitch"), result.byPosition.starters, "last_season_points", "pts");
+  renderPitch($("#xiPitch"), result.byPosition.starters, "last_season_points", "pts", { context: "xi", role: "starters" });
   renderBench($("#xiBench"), result.byPosition.bench.GK
-    .concat(result.byPosition.bench.DEF, result.byPosition.bench.MID, result.byPosition.bench.FWD));
+    .concat(result.byPosition.bench.DEF, result.byPosition.bench.MID, result.byPosition.bench.FWD),
+    { context: "xi", role: "bench" });
 }
 
 function rebuildTeams() {
@@ -89,16 +117,23 @@ function rebuildTeams() {
   setTimeout(() => {
     try {
       const pool = usablePlayers();
-      const valueResult = buildValueSquad(pool, budget);
-      const xiResult = buildStartingXIsquad(pool, budget);
+      const valueFixed = [...state.fixed.value.values()];
+      const xiFixed = {
+        starters: [...state.fixed.xiStarters.values()],
+        bench: [...state.fixed.xiBench.values()],
+      };
+      const valueResult = buildValueSquad(pool, budget, valueFixed);
+      const xiResult = buildStartingXIsquad(pool, budget, xiFixed);
       state.valueResult = valueResult;
       state.xiResult = xiResult;
       renderValueSquad(valueResult);
       renderXISquad(xiResult);
-      statusMsg.textContent = `Updated for £${budget.toFixed(1)}m budget.`;
+      const fixedCount = valueFixed.length + xiFixed.starters.length + xiFixed.bench.length;
+      statusMsg.textContent = `Updated for £${budget.toFixed(1)}m budget.` +
+        (fixedCount ? ` ${fixedCount} fixed player(s) kept.` : "");
     } catch (err) {
       console.error(err);
-      statusMsg.textContent = "Could not build a squad for that budget - try a higher value.";
+      statusMsg.textContent = err.message || "Could not build a squad for that budget - try a higher value.";
     }
   }, 10);
 }
@@ -138,6 +173,160 @@ function renderTable() {
   }
 }
 
+function currentSquadIds(context) {
+  const result = context === "value" ? state.valueResult : state.xiResult;
+  return new Set(result.squad.map((p) => p.id));
+}
+
+function openPlayerModal(player, ctx) {
+  state.modal = { player, context: ctx.context, role: ctx.role };
+
+  $("#modalTitle").textContent = `Replace ${player.web_name}`;
+  $("#modalSubtitle").textContent =
+    `${player.position} · ${player.team_short} · £${player.now_cost.toFixed(1)}m — pick a same-position player to swap in.`;
+
+  const isFixed = fixedMapFor(ctx.context, ctx.role).has(player.id);
+  $("#modalFixedNote").classList.toggle("hidden", !isFixed);
+
+  const posPlayers = usablePlayers().filter((p) => p.position === player.position);
+
+  const clubSelect = $("#modalClubFilter");
+  const clubs = [...new Set(posPlayers.map((p) => p.team))].sort();
+  clubSelect.innerHTML =
+    `<option value="">All clubs</option>` + clubs.map((c) => `<option value="${c}">${c}</option>`).join("");
+  clubSelect.value = "";
+
+  const costs = posPlayers.map((p) => p.now_cost);
+  const priceInput = $("#modalPriceMax");
+  priceInput.min = String(Math.floor(Math.min(...costs) * 10) / 10);
+  priceInput.max = String(Math.ceil(Math.max(...costs) * 10) / 10);
+  priceInput.step = "0.1";
+  priceInput.value = priceInput.max;
+  $("#modalPriceVal").textContent = priceInput.value;
+
+  $("#modalSearch").value = "";
+  $("#modalSort").value = "last_season_points";
+
+  renderModalList();
+  $("#playerModal").classList.remove("hidden");
+}
+
+function closePlayerModal() {
+  $("#playerModal").classList.add("hidden");
+  state.modal = null;
+}
+
+function renderModalList() {
+  const list = $("#modalList");
+  if (!state.modal) return;
+  const { player, context } = state.modal;
+
+  const q = $("#modalSearch").value.trim().toLowerCase();
+  const club = $("#modalClubFilter").value;
+  const maxPrice = parseFloat($("#modalPriceMax").value);
+  const sortKey = $("#modalSort").value;
+
+  const excludeIds = currentSquadIds(context);
+  excludeIds.delete(player.id); // the clicked player's own slot is always shown
+
+  let rows = usablePlayers().filter((p) => {
+    if (p.position !== player.position) return false;
+    if (p.id !== player.id && excludeIds.has(p.id)) return false; // no duplicate squad members
+    if (club && p.team !== club) return false;
+    if (p.now_cost > maxPrice + 1e-9) return false;
+    if (q) {
+      const hay = `${p.web_name} ${p.team} ${p.first_name} ${p.second_name}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  rows = rows.slice().sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
+  rows = rows.slice(0, 150);
+
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(el("p", "modal-empty", "No players match these filters."));
+    return;
+  }
+  for (const p of rows) {
+    const isCurrent = p.id === player.id;
+    const row = el("div", "modal-row" + (isCurrent ? " current" : ""));
+    row.appendChild(el("span", "mr-name", `${p.web_name}${isCurrent ? " <small>(current)</small>" : ""}`));
+    row.appendChild(el("span", "mr-club", p.team_short));
+    row.appendChild(el("span", "mr-cost", `£${p.now_cost.toFixed(1)}m`));
+    row.appendChild(el("span", "mr-pts", `${p.last_season_points} pts`));
+    row.addEventListener("click", () => selectReplacement(p));
+    list.appendChild(row);
+  }
+}
+
+function swapPlayerInSquad(context, role, oldPlayer, newPlayer) {
+  const pos = oldPlayer.position;
+  const posOrder = ["GK", "DEF", "MID", "FWD"];
+
+  if (context === "value") {
+    const arr = state.valueResult.byPosition[pos];
+    const idx = arr.findIndex((p) => p.id === oldPlayer.id);
+    if (idx === -1) return;
+    arr[idx] = newPlayer;
+    state.valueResult.squad = posOrder.flatMap((p) => state.valueResult.byPosition[p]);
+    state.valueResult.totalCost = state.valueResult.squad.reduce((s, p) => s + p.now_cost, 0);
+    state.valueResult.totalPoints = state.valueResult.squad.reduce((s, p) => s + p.last_season_points, 0);
+    renderValueSquad(state.valueResult);
+  } else {
+    const arr = state.xiResult.byPosition[role][pos];
+    const idx = arr.findIndex((p) => p.id === oldPlayer.id);
+    if (idx === -1) return;
+    arr[idx] = newPlayer;
+    state.xiResult.starters = posOrder.flatMap((p) => state.xiResult.byPosition.starters[p]);
+    state.xiResult.bench = posOrder.flatMap((p) => state.xiResult.byPosition.bench[p]);
+    state.xiResult.squad = [...state.xiResult.starters, ...state.xiResult.bench];
+    state.xiResult.totalCost = state.xiResult.squad.reduce((s, p) => s + p.now_cost, 0);
+    state.xiResult.xiPoints = state.xiResult.starters.reduce((s, p) => s + p.last_season_points, 0);
+    state.xiResult.benchCost = state.xiResult.bench.reduce((s, p) => s + p.now_cost, 0);
+    renderXISquad(state.xiResult);
+  }
+}
+
+function selectReplacement(newPlayer) {
+  if (!state.modal) return;
+  const { player: oldPlayer, context, role } = state.modal;
+  if (newPlayer.id !== oldPlayer.id) {
+    const fixedMap = fixedMapFor(context, role);
+    fixedMap.delete(oldPlayer.id);
+    fixedMap.set(newPlayer.id, newPlayer);
+    swapPlayerInSquad(context, role, oldPlayer, newPlayer); // re-renders, so the map must be up to date first
+  }
+  closePlayerModal();
+}
+
+function unfixCurrentModalPlayer() {
+  if (!state.modal) return;
+  const { player, context, role } = state.modal;
+  fixedMapFor(context, role).delete(player.id);
+  closePlayerModal();
+  if (context === "value") renderValueSquad(state.valueResult);
+  else renderXISquad(state.xiResult);
+}
+
+function wireModal() {
+  $("#modalClose").addEventListener("click", closePlayerModal);
+  $("#playerModal").addEventListener("click", (e) => {
+    if (e.target.id === "playerModal") closePlayerModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.modal) closePlayerModal();
+  });
+  $("#modalSearch").addEventListener("input", renderModalList);
+  $("#modalClubFilter").addEventListener("change", renderModalList);
+  $("#modalSort").addEventListener("change", renderModalList);
+  $("#modalPriceMax").addEventListener("input", () => {
+    $("#modalPriceVal").textContent = $("#modalPriceMax").value;
+    renderModalList();
+  });
+  $("#modalUnfix").addEventListener("click", unfixCurrentModalPlayer);
+}
+
 function wireTabs() {
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -151,6 +340,7 @@ function wireTabs() {
 
 async function main() {
   wireTabs();
+  wireModal();
   await loadData();
   rebuildTeams();
   renderTable();

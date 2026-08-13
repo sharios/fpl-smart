@@ -47,7 +47,7 @@
   <section id="valueSquad" class="tab-panel active">
     <div class="card summary-card" id="valueSummary"></div>
     <div class="pitch" id="valuePitch"></div>
-    <p class="hint">All 15 squad players count toward total points &mdash; this is the squad that maximises total last-season points within budget.</p>
+    <p class="hint">All 15 squad players count toward total points &mdash; this is the squad that maximises total last-season points within budget. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
   <section id="xiSquad" class="tab-panel">
@@ -55,7 +55,7 @@
     <div class="pitch" id="xiPitch"></div>
     <h3 class="bench-heading">Bench (cheapest fillers)</h3>
     <div class="bench-row" id="xiBench"></div>
-    <p class="hint">The 11 starters are chosen to maximise points in a valid formation; the 4 bench players are the cheapest available for their position so more budget goes to the starting XI.</p>
+    <p class="hint">The 11 starters are chosen to maximise points in a valid formation; the 4 bench players are the cheapest available for their position so more budget goes to the starting XI. Tap any player to swap them for someone else &mdash; swapped players are fixed and stay put when you rebuild.</p>
   </section>
 
   <section id="playerTable" class="tab-panel">
@@ -93,6 +93,39 @@
 <footer class="app-footer">
   <p>Data: current prices &amp; clubs from the FPL API snapshot; last-season points from completed gameweek data. Squad rules: 2 GK / 5 DEF / 5 MID / 3 FWD, max 3 players per club.</p>
 </footer>
+
+<div id="playerModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <h3 id="modalTitle">Replace player</h3>
+        <p class="modal-subtitle" id="modalSubtitle"></p>
+      </div>
+      <button id="modalClose" class="modal-close" aria-label="Close" type="button">&times;</button>
+    </div>
+
+    <p id="modalFixedNote" class="modal-fixed-note hidden">
+      This player is fixed and won't be changed on rebuild.
+      <button id="modalUnfix" class="btn btn-secondary btn-small" type="button">Unfix</button>
+    </p>
+
+    <div class="modal-controls">
+      <input type="text" id="modalSearch" placeholder="Search player&hellip;" />
+      <select id="modalClubFilter"><option value="">All clubs</option></select>
+      <select id="modalSort">
+        <option value="last_season_points">Sort: Points</option>
+        <option value="pts_per_million">Sort: Points per &pound;m</option>
+        <option value="now_cost">Sort: Price</option>
+      </select>
+      <label class="modal-price-filter">
+        Max price &pound;<span id="modalPriceVal"></span>m
+        <input type="range" id="modalPriceMax" min="3.5" max="15" step="0.1" />
+      </label>
+    </div>
+
+    <div id="modalList" class="modal-list"></div>
+  </div>
+</div>
 
 <script src="js/optimizer.js"></script>
 <script src="js/app.js"></script>
