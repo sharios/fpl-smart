@@ -83,6 +83,14 @@ async function loadData() {
     if (!state.teamShortByName[p.team]) state.teamShortByName[p.team] = p.team_short;
   }
 
+  // team name -> 1-4, which quarter of last season's final table they
+  // finished in (1 = top 5, toughest opponent; 4 = bottom 5, easiest).
+  // Newly promoted teams have no last-season quarter and are left unset.
+  state.teamQuarter = {};
+  for (const [q, teams] of Object.entries(predictions.quarters || {})) {
+    for (const team of teams) state.teamQuarter[team] = Number(q);
+  }
+
   $("#metaLine").textContent =
     `${meta.player_count} players • current: ${meta.current_season} • ` +
     `last season points from ${meta.last_season} (2nd half = ${meta.half_split.split(" vs ")[1]})`;
@@ -113,17 +121,31 @@ function teamShort(teamName) {
   return (state.teamShortByName && state.teamShortByName[teamName]) || teamName;
 }
 
-// The opponent(s) `team` faces in exactly gameweek `week` ("ARS (H)"), or
-// null on a blank gameweek. Double gameweeks join both legs with " & ".
+// CSS class for an opponent's fixture-difficulty colour, based on which
+// quarter of last season's final table they finished in (q1 = top 5,
+// hardest, red -> q4 = bottom 5, easiest, dark green). Promoted teams have
+// no last-season quarter and get a neutral "unknown" colour.
+function quarterClass(team) {
+  const q = state.teamQuarter && state.teamQuarter[team];
+  return q ? `q${q}` : "qu";
+}
+
+// Small coloured "OPP (H/A)" pill for one fixture, coloured by the
+// opponent's last-season quarter.
+function oppPillHtml(f) {
+  return `<span class="opp-pill ${quarterClass(f.opponent)}">${teamShort(f.opponent)} (${f.isHome ? "H" : "A"})</span>`;
+}
+
+// The fixture(s) `team` has in exactly gameweek `week`, or null on a blank
+// gameweek. Double gameweeks return multiple entries.
 function opponentAtWeek(team, week) {
   const fixtures = (state.teamFixtures[team] || []).filter((f) => f.event === week);
-  if (!fixtures.length) return null;
-  return fixtures.map((f) => `${teamShort(f.opponent)} (${f.isHome ? "H" : "A"})`).join(" & ");
+  return fixtures.length ? fixtures : null;
 }
 
 // The next `count` gameweeks of fixtures for `team` from `fromWeek`
 // (inclusive) onward, skipping blank gameweeks; each entry is one
-// gameweek's opponent(s) as a display string.
+// gameweek's fixture(s) (more than one on a double gameweek).
 function upcomingOpponents(team, fromWeek, count) {
   const fixtures = state.teamFixtures[team] || [];
   const byEvent = {};
@@ -135,7 +157,7 @@ function upcomingOpponents(team, fromWeek, count) {
     .map(Number)
     .sort((a, b) => a - b)
     .slice(0, count);
-  return events.map((ev) => byEvent[ev].map((f) => `${teamShort(f.opponent)} (${f.isHome ? "H" : "A"})`).join(" & "));
+  return events.map((ev) => byEvent[ev]);
 }
 
 function fixedMapFor(context, role) {
@@ -167,8 +189,9 @@ function chip(p, statKey, statLabel, ctx, flags = {}) {
 
 function oppTextFor(team, startWeek) {
   if (!Number.isInteger(startWeek)) return "";
-  const opp = opponentAtWeek(team, startWeek);
-  return opp ? `GW${startWeek}: vs ${opp}` : `GW${startWeek}: no fixture`;
+  const fixtures = opponentAtWeek(team, startWeek);
+  if (!fixtures) return `GW${startWeek}: no fixture`;
+  return `GW${startWeek}: ${fixtures.map(oppPillHtml).join(" & ")}`;
 }
 
 function renderPitch(container, byPosition, statKey, statLabel, ctx, captainId, overClubs, startWeek) {
@@ -340,7 +363,10 @@ function renderTable() {
 
   tbody.innerHTML = "";
   for (const p of rows) {
-    const nextFixtures = upcomingOpponents(p.team, fromWeek, 4).join(", ") || "—";
+    const nextFixtures =
+      upcomingOpponents(p.team, fromWeek, 4)
+        .map((evFixtures) => evFixtures.map(oppPillHtml).join(""))
+        .join(" ") || "—";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${p.web_name}${p.new_to_pl ? " <small>(new)</small>" : ""}</td>

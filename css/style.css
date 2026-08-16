@@ -152,7 +152,24 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 .player-chip .pname { display: block; font-weight: 800; font-size: 0.68rem; line-height: 1.1; margin-bottom: 2px; }
 .player-chip .pclub { display: block; color: var(--text-muted); font-size: 0.58rem; }
 .player-chip .pstat { display: block; font-weight: 700; color: var(--purple); font-size: 0.62rem; margin-top: 2px; }
-.player-chip .popp { display: block; color: var(--text-muted); font-size: 0.56rem; margin-top: 1px; }
+.player-chip .popp { display: block; color: var(--text-muted); font-size: 0.56rem; margin-top: 2px; }
+
+/* Fixture-difficulty pills, coloured by the opponent's last-season quarter:
+   q1 = top 5 (toughest, red) .. q4 = bottom 5 (easiest, dark green).
+   qu = promoted club with no last-season quarter (neutral). */
+.opp-pill {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-weight: 700;
+  white-space: nowrap;
+  margin: 1px 2px 1px 0;
+}
+.opp-pill.q1 { background: #e03131; color: #fff; }
+.opp-pill.q2 { background: #f2c94c; color: #4a3800; }
+.opp-pill.q3 { background: #8ce38f; color: #0b3d0b; }
+.opp-pill.q4 { background: #1f9d55; color: #fff; }
+.opp-pill.qu { background: #cfc9d6; color: #4a4150; }
 
 .bench-heading { font-size: 0.85rem; margin: 4px 2px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .bench-row {
