@@ -84,6 +84,16 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 .summary-stat { text-align: center; flex: 1; min-width: 80px; }
 .summary-stat .val { font-size: 1.15rem; font-weight: 800; color: var(--purple); display: block; }
 .summary-stat .lbl { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.club-warning {
+  flex: 1 1 100%;
+  background: #fdeaea;
+  color: #b3261e;
+  font-weight: 700;
+  font-size: 0.76rem;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: center;
+}
 
 .pitch {
   background: linear-gradient(180deg, #1e7d3a, #1a6b32);
@@ -110,12 +120,26 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 }
 .player-chip:active { transform: scale(0.95); }
 .player-chip.fixed { border-color: var(--pink); }
+.player-chip.captain { border-color: var(--green); }
+.player-chip.club-violation { border-color: #ff3b30; }
+.player-chip.club-violation .pclub { color: #ff3b30; font-weight: 800; }
 .player-chip .pin-badge {
   display: block;
   font-size: 0.6rem;
   color: var(--pink);
   font-weight: 800;
   margin-top: 1px;
+}
+.player-chip .cap-badge {
+  display: inline-block;
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: #056b39;
+  background: var(--green);
+  padding: 0 4px;
+  border-radius: 6px;
+  margin-left: 3px;
+  vertical-align: middle;
 }
 .player-chip .pos-badge {
   display: inline-block; font-size: 0.55rem; font-weight: 800; color: #fff;
@@ -128,6 +152,7 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 .player-chip .pname { display: block; font-weight: 800; font-size: 0.68rem; line-height: 1.1; margin-bottom: 2px; }
 .player-chip .pclub { display: block; color: var(--text-muted); font-size: 0.58rem; }
 .player-chip .pstat { display: block; font-weight: 700; color: var(--purple); font-size: 0.62rem; margin-top: 2px; }
+.player-chip .popp { display: block; color: var(--text-muted); font-size: 0.56rem; margin-top: 1px; }
 
 .bench-heading { font-size: 0.85rem; margin: 4px 2px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .bench-row {
@@ -221,9 +246,13 @@ tbody tr:nth-child(even) { background: #faf9fb; }
 }
 .modal-row:active { transform: scale(0.99); }
 .modal-row.current { border-color: var(--pink); background: #fdeaf2; }
+.modal-row.in-team { opacity: 0.55; cursor: not-allowed; background: #e4dfe8; }
+.modal-row.in-team:active { transform: none; }
+.modal-row.club-warn { border-color: #ff9d00; background: #fff4e0; }
 .modal-row .mr-name { font-weight: 700; font-size: 0.85rem; flex: 1 1 auto; }
 .modal-row .mr-name small { color: var(--text-muted); font-weight: 500; }
 .modal-row .mr-club { font-size: 0.72rem; color: var(--text-muted); width: 42px; }
 .modal-row .mr-cost { font-size: 0.78rem; font-weight: 700; color: var(--purple); width: 46px; text-align: right; }
 .modal-row .mr-pts { font-size: 0.72rem; color: var(--text-muted); width: 60px; text-align: right; }
+.modal-row .mr-badge { font-size: 0.62rem; font-weight: 800; color: #b35c00; width: 52px; text-align: right; }
 .modal-empty { font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 20px 0; }

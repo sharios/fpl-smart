@@ -74,8 +74,13 @@ async function loadData() {
 
   state.teamFixtures = {};
   for (const f of currentFixtures) {
-    (state.teamFixtures[f.home] ||= []).push({ event: f.event, opponent: f.away });
-    (state.teamFixtures[f.away] ||= []).push({ event: f.event, opponent: f.home });
+    (state.teamFixtures[f.home] ||= []).push({ event: f.event, opponent: f.away, isHome: true });
+    (state.teamFixtures[f.away] ||= []).push({ event: f.event, opponent: f.home, isHome: false });
+  }
+
+  state.teamShortByName = {};
+  for (const p of players) {
+    if (!state.teamShortByName[p.team]) state.teamShortByName[p.team] = p.team_short;
   }
 
   $("#metaLine").textContent =
@@ -104,19 +109,52 @@ function usablePlayers() {
   return state.players.filter((p) => p.status !== "u");
 }
 
+function teamShort(teamName) {
+  return (state.teamShortByName && state.teamShortByName[teamName]) || teamName;
+}
+
+// The opponent(s) `team` faces in exactly gameweek `week` ("ARS (H)"), or
+// null on a blank gameweek. Double gameweeks join both legs with " & ".
+function opponentAtWeek(team, week) {
+  const fixtures = (state.teamFixtures[team] || []).filter((f) => f.event === week);
+  if (!fixtures.length) return null;
+  return fixtures.map((f) => `${teamShort(f.opponent)} (${f.isHome ? "H" : "A"})`).join(" & ");
+}
+
+// The next `count` gameweeks of fixtures for `team` from `fromWeek`
+// (inclusive) onward, skipping blank gameweeks; each entry is one
+// gameweek's opponent(s) as a display string.
+function upcomingOpponents(team, fromWeek, count) {
+  const fixtures = state.teamFixtures[team] || [];
+  const byEvent = {};
+  for (const f of fixtures) {
+    if (f.event < fromWeek) continue;
+    (byEvent[f.event] ||= []).push(f);
+  }
+  const events = Object.keys(byEvent)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .slice(0, count);
+  return events.map((ev) => byEvent[ev].map((f) => `${teamShort(f.opponent)} (${f.isHome ? "H" : "A"})`).join(" & "));
+}
+
 function fixedMapFor(context, role) {
   if (role === "starters") return state.fixed[`${context}Starters`];
   if (role === "bench") return state.fixed[`${context}Bench`];
   return state.fixed[context]; // role === "squad"
 }
 
-function chip(p, statKey, statLabel, ctx) {
+function chip(p, statKey, statLabel, ctx, flags = {}) {
   const c = el("div", "player-chip");
+  if (flags.captain) c.classList.add("captain");
+  if (flags.overClub) c.classList.add("club-violation");
   const posBadge = el("span", `pos-badge ${p.position}`, p.position);
   c.appendChild(posBadge);
-  c.appendChild(el("span", "pname", p.web_name));
+  c.appendChild(el("span", "pname", flags.captain ? `${p.web_name} <span class="cap-badge">C</span>` : p.web_name));
   c.appendChild(el("span", "pclub", `${p.team_short} £${p.now_cost.toFixed(1)}m`));
-  c.appendChild(el("span", "pstat", `${p[statKey]} ${statLabel}`));
+  const statVal = flags.captain ? (p[statKey] || 0) * 2 : p[statKey];
+  c.appendChild(el("span", "pstat", `${statVal} ${statLabel}${flags.captain ? " (2x)" : ""}`));
+  if (flags.oppText) c.appendChild(el("span", "popp", flags.oppText));
   if (ctx) {
     if (fixedMapFor(ctx.context, ctx.role).has(p.id)) {
       c.classList.add("fixed");
@@ -127,21 +165,58 @@ function chip(p, statKey, statLabel, ctx) {
   return c;
 }
 
-function renderPitch(container, byPosition, statKey, statLabel, ctx) {
+function oppTextFor(team, startWeek) {
+  if (!Number.isInteger(startWeek)) return "";
+  const opp = opponentAtWeek(team, startWeek);
+  return opp ? `GW${startWeek}: vs ${opp}` : `GW${startWeek}: no fixture`;
+}
+
+function renderPitch(container, byPosition, statKey, statLabel, ctx, captainId, overClubs, startWeek) {
   container.innerHTML = "";
   const order = ["GK", "DEF", "MID", "FWD"];
   for (const pos of order) {
     const players = byPosition[pos] || [];
     if (!players.length) continue;
     const row = el("div", "pitch-row");
-    for (const p of players) row.appendChild(chip(p, statKey, statLabel, ctx));
+    for (const p of players) {
+      const flags = {
+        captain: p.id === captainId,
+        overClub: !!(overClubs && overClubs.has(p.team)),
+        oppText: oppTextFor(p.team, startWeek),
+      };
+      row.appendChild(chip(p, statKey, statLabel, ctx, flags));
+    }
     container.appendChild(row);
   }
 }
 
-function renderBench(container, benchPlayers, ctx) {
+function renderBench(container, benchPlayers, ctx, overClubs, startWeek) {
   container.innerHTML = "";
-  for (const p of benchPlayers) container.appendChild(chip(p, "now_cost", "", ctx));
+  for (const p of benchPlayers) {
+    const flags = { overClub: !!(overClubs && overClubs.has(p.team)), oppText: oppTextFor(p.team, startWeek) };
+    container.appendChild(chip(p, "now_cost", "", ctx, flags));
+  }
+}
+
+// Real-world club a player belongs to -> count of squad members from that
+// club. Used both to flag >3-per-club violations after a manual swap and to
+// warn in the replace-player modal before one is made.
+function clubCounts(squad) {
+  const counts = {};
+  for (const p of squad) counts[p.team] = (counts[p.team] || 0) + 1;
+  return counts;
+}
+
+function clubsOverLimit(squad) {
+  const counts = clubCounts(squad);
+  return new Set(Object.entries(counts).filter(([, n]) => n > MAX_PER_CLUB).map(([team]) => team));
+}
+
+// FPL captaincy: the starter with the highest expected points earns double.
+// Only meaningful for the starting-XI strategies (a captain must be playing).
+function captainOf(starters, valueKey) {
+  if (!starters || !starters.length) return null;
+  return starters.reduce((best, p) => ((p[valueKey] || 0) > (best[valueKey] || 0) ? p : best), starters[0]);
 }
 
 function summaryStat(val, lbl) {
@@ -158,22 +233,45 @@ function renderSquadTab(context) {
   const summary = $(ids.summary);
   summary.innerHTML = "";
 
+  const overClubs = clubsOverLimit(result.squad);
+  const startWeek = parseInt($("#startWeekInput").value, 10);
+
   if (cfg.isXI) {
+    const captain = captainOf(result.starters, cfg.valueKey);
+    const xiPointsWithCaptain = result.xiPoints + (captain ? captain[cfg.valueKey] || 0 : 0);
+
     summary.appendChild(summaryStat(result.formation, "Formation"));
     summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Squad cost"));
-    summary.appendChild(summaryStat(result.xiPoints, `XI ${cfg.pointsLabel} (${cfg.periodLabel})`));
+    summary.appendChild(summaryStat(xiPointsWithCaptain, `XI ${cfg.pointsLabel} incl. captain (${cfg.periodLabel})`));
     summary.appendChild(summaryStat(`£${result.benchCost.toFixed(1)}m`, "Bench cost"));
-    renderPitch($(ids.pitch), result.byPosition.starters, cfg.valueKey, cfg.pointsLabel, { context, role: "starters" });
+    if (overClubs.size) {
+      summary.appendChild(el("div", "club-warning", `⚠ More than ${MAX_PER_CLUB} players from: ${[...overClubs].join(", ")}`));
+    }
+    renderPitch(
+      $(ids.pitch),
+      result.byPosition.starters,
+      cfg.valueKey,
+      cfg.pointsLabel,
+      { context, role: "starters" },
+      captain ? captain.id : null,
+      overClubs,
+      startWeek
+    );
     renderBench(
       $(ids.bench),
       result.byPosition.bench.GK.concat(result.byPosition.bench.DEF, result.byPosition.bench.MID, result.byPosition.bench.FWD),
-      { context, role: "bench" }
+      { context, role: "bench" },
+      overClubs,
+      startWeek
     );
   } else {
     summary.appendChild(summaryStat(`£${result.totalCost.toFixed(1)}m`, "Total cost"));
     summary.appendChild(summaryStat(result.totalPoints, `Total ${cfg.pointsLabel} (${cfg.periodLabel})`));
     summary.appendChild(summaryStat((result.totalPoints / result.totalCost).toFixed(1), "Pts per £m"));
-    renderPitch($(ids.pitch), result.byPosition, cfg.valueKey, cfg.pointsLabel, { context, role: "squad" });
+    if (overClubs.size) {
+      summary.appendChild(el("div", "club-warning", `⚠ More than ${MAX_PER_CLUB} players from: ${[...overClubs].join(", ")}`));
+    }
+    renderPitch($(ids.pitch), result.byPosition, cfg.valueKey, cfg.pointsLabel, { context, role: "squad" }, null, overClubs, startWeek);
   }
 }
 
@@ -210,6 +308,7 @@ function rebuildTeams() {
       }
 
       for (const context of Object.keys(CONTEXTS)) renderSquadTab(context);
+      renderTable();
 
       statusMsg.textContent =
         `Updated for £${budget.toFixed(1)}m budget.` + (fixedCount ? ` ${fixedCount} fixed player(s) kept.` : "");
@@ -225,6 +324,8 @@ function renderTable() {
   const q = $("#searchInput").value.trim().toLowerCase();
   const posFilter = $("#positionFilter").value;
   const sortKey = $("#sortSelect").value;
+  const startWeek = parseInt($("#startWeekInput").value, 10);
+  const fromWeek = Number.isInteger(startWeek) ? startWeek : 1;
 
   let rows = state.players.filter((p) => {
     if (posFilter && p.position !== posFilter) return false;
@@ -239,11 +340,13 @@ function renderTable() {
 
   tbody.innerHTML = "";
   for (const p of rows) {
+    const nextFixtures = upcomingOpponents(p.team, fromWeek, 4).join(", ") || "—";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${p.web_name}${p.new_to_pl ? " <small>(new)</small>" : ""}</td>
       <td>${p.position}</td>
       <td>${p.team_short}</td>
+      <td>${nextFixtures}</td>
       <td>${p.now_cost.toFixed(1)}</td>
       <td>${p.last_season_club_short || "—"}</td>
       <td>${p.last_season_points}</td>
@@ -309,12 +412,14 @@ function renderModalList() {
   const maxPrice = parseFloat($("#modalPriceMax").value);
   const sortKey = $("#modalSort").value;
 
-  const excludeIds = currentSquadIds(context);
-  excludeIds.delete(player.id); // the clicked player's own slot is always shown
+  const squadIds = currentSquadIds(context); // includes player.id, its own slot
+
+  // Club counts with the player being replaced removed, so we can tell
+  // whether adding a given candidate would push their club past the limit.
+  const countsExPlayer = clubCounts(state[cfg.resultKey].squad.filter((sp) => sp.id !== player.id));
 
   let rows = usablePlayers().filter((p) => {
     if (p.position !== player.position) return false;
-    if (p.id !== player.id && excludeIds.has(p.id)) return false; // no duplicate squad members
     if (club && p.team !== club) return false;
     if (p.now_cost > maxPrice + 1e-9) return false;
     if (q) {
@@ -333,12 +438,25 @@ function renderModalList() {
   }
   for (const p of rows) {
     const isCurrent = p.id === player.id;
-    const row = el("div", "modal-row" + (isCurrent ? " current" : ""));
-    row.appendChild(el("span", "mr-name", `${p.web_name}${isCurrent ? " <small>(current)</small>" : ""}`));
+    // Already elsewhere in this squad - shown for reference but can't be
+    // picked again (would create a duplicate squad slot).
+    const isInTeam = !isCurrent && squadIds.has(p.id);
+    const wouldExceedClub = !isCurrent && !isInTeam && (countsExPlayer[p.team] || 0) + 1 > MAX_PER_CLUB;
+
+    const classes = ["modal-row"];
+    if (isCurrent) classes.push("current");
+    if (isInTeam) classes.push("in-team");
+    if (wouldExceedClub) classes.push("club-warn");
+
+    const row = el("div", classes.join(" "));
+    let nameHtml = `${p.web_name}${isCurrent ? " <small>(current)</small>" : ""}`;
+    if (isInTeam) nameHtml += " <small>(in team)</small>";
+    row.appendChild(el("span", "mr-name", nameHtml));
     row.appendChild(el("span", "mr-club", p.team_short));
     row.appendChild(el("span", "mr-cost", `£${p.now_cost.toFixed(1)}m`));
     row.appendChild(el("span", "mr-pts", `${p[cfg.valueKey]} ${cfg.pointsLabel}`));
-    row.addEventListener("click", () => selectReplacement(p));
+    if (wouldExceedClub) row.appendChild(el("span", "mr-badge", `4th ${p.team_short}`));
+    if (!isInTeam) row.addEventListener("click", () => selectReplacement(p));
     list.appendChild(row);
   }
 }
@@ -432,6 +550,7 @@ async function main() {
   $("#searchInput").addEventListener("input", renderTable);
   $("#positionFilter").addEventListener("change", renderTable);
   $("#sortSelect").addEventListener("change", renderTable);
+  $("#startWeekInput").addEventListener("input", renderTable);
 
   if ("serviceWorker" in navigator) {
     // If this load was already controlled by a service worker and a newer
