@@ -156,7 +156,7 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 
 /* Fixture-difficulty pills, coloured by the opponent's last-season quarter:
    q1 = top 5 (toughest, red) .. q4 = bottom 5 (easiest, dark green).
-   qu = promoted club with no last-season quarter (neutral). */
+   Promoted clubs (no last-season quarter) are assumed Q4. */
 .opp-pill {
   display: inline-block;
   padding: 1px 5px;
@@ -169,7 +169,6 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
 .opp-pill.q2 { background: #f2c94c; color: #4a3800; }
 .opp-pill.q3 { background: #8ce38f; color: #0b3d0b; }
 .opp-pill.q4 { background: #1f9d55; color: #fff; }
-.opp-pill.qu { background: #cfc9d6; color: #4a4150; }
 
 .bench-heading { font-size: 0.85rem; margin: 4px 2px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .bench-row {

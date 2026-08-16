@@ -124,10 +124,11 @@ function teamShort(teamName) {
 // CSS class for an opponent's fixture-difficulty colour, based on which
 // quarter of last season's final table they finished in (q1 = top 5,
 // hardest, red -> q4 = bottom 5, easiest, dark green). Promoted teams have
-// no last-season quarter and get a neutral "unknown" colour.
+// no last-season quarter - assume they'll finish Q4, same as a newly-up club
+// is generally expected to.
 function quarterClass(team) {
-  const q = state.teamQuarter && state.teamQuarter[team];
-  return q ? `q${q}` : "qu";
+  const q = (state.teamQuarter && state.teamQuarter[team]) || 4;
+  return `q${q}`;
 }
 
 // Small coloured "OPP (H/A)" pill for one fixture, coloured by the
